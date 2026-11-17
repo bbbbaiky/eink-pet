@@ -8676,9 +8676,9 @@ static void ui_dev_id(char *out, size_t cap)
       改 FW_BUILD 的 R 号时，**同一笔改动里**就把 APP_VER_MINOR 和 PROJECT_VER 一起改掉。
    历史映射：R157~R163 曾显示为 v6.4；R164~R166 曾显示为 v6.5；R167 起回到 v0.167。 */
 #define APP_VER_MAJOR  0
-#define APP_VER_MINOR  224   /* == R 号；v0.224 ↔ R224。次版本号只增不减，1.0 时机由用户定 */
+#define APP_VER_MINOR  225   /* == R 号；v0.225 ↔ R225。次版本号只增不减，1.0 时机由用户定 */
 #define APP_VER_PATCH  0
-#define APP_VERSION     "v0.224"
+#define APP_VERSION     "v0.225"
 
 static void ui_fw_ver(char *out, size_t cap)
 {
@@ -20753,7 +20753,7 @@ typedef struct { const char *q; const char *opt[3]; } pers_q_t;
       若设备仍是 R195 assets，则需 app + assets 一起烧（不擦 NVS）。
 */
 
-#define FW_BUILD  APP_VERSION " · R224"  /* ★R224：**OTA 源顺序调整 gh-proxy 提回首选**（PC 实测 521KB/s vs ghfast 112KB/s）+ 版本号 +1 供 223 实机验证续传；含 R223 按键反白 + R222 续传 */
+#define FW_BUILD  APP_VERSION " · R225"  /* ★R225：**测试载体**（功能同 R224，版本号 +1 让 224 实机走 gh-proxy 首选验证提速+续传）；含 R224 换序 + R223 按键反白 + R222 续传 */
 /* 历史：R217 = 遗留 9 条收口（go_page 默认清框 / 按键软件去抖 / 路径去硬编码 / 三语硬拦 / 生成链自足）（含 R216）
    ── 用户令（2026-11-13）：「需要我定夺的那些也改」。
    ── ① TF卡信可转发：mypost_fwd_begin 改按 ts 反查条目（mypost_entry_by_ts），

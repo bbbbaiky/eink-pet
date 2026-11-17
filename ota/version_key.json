@@ -1,9 +1,9 @@
 {
- "ver": "0.224",
+ "ver": "0.225",
  "size": 1792928,
  "url": "https://ghfast.top/https://raw.githubusercontent.com/bbbbaiky/eink-pet/main/ota/pet_key.bin",
  "notes": [
-  "R224: gh-proxy first for faster OTA",
-  "Test resume from v223, slower net"
+  "R225: test gh-proxy first speed from 224",
+  "resume still active"
  ]
 }
