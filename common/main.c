@@ -8671,9 +8671,9 @@ static void ui_dev_id(char *out, size_t cap)
       改 FW_BUILD 的 R 号时，**同一笔改动里**就把 APP_VER_MINOR 和 PROJECT_VER 一起改掉。
    历史映射：R157~R163 曾显示为 v6.4；R164~R166 曾显示为 v6.5；R167 起回到 v0.167。 */
 #define APP_VER_MAJOR  0
-#define APP_VER_MINOR  219   /* == R 号；v0.219 ↔ R219。次版本号只增不减，1.0 时机由用户定 */
+#define APP_VER_MINOR  220   /* == R 号；v0.220 ↔ R220。次版本号只增不减，1.0 时机由用户定 */
 #define APP_VER_PATCH  0
-#define APP_VERSION     "v0.219"
+#define APP_VERSION     "v0.220"
 
 static void ui_fw_ver(char *out, size_t cap)
 {
@@ -20720,7 +20720,7 @@ typedef struct { const char *q; const char *opt[3]; } pers_q_t;
       若设备仍是 R195 assets，则需 app + assets 一起烧（不擦 NVS）。
 */
 
-#define FW_BUILD  APP_VERSION " · R219"  /* ★R219：**笔友来信不叠猫 + 好友定向投递 + 收信窗口 + 升级页卡片化 + 在线升级提速**（含 R218） */
+#define FW_BUILD  APP_VERSION " · R220"  /* ★R220：**OTA 发布件首次上线（ota/ 目录四件），供 219 实机验证在线升级**；固件功能同 R219（含 R219） */
 /* 历史：R217 = 遗留 9 条收口（go_page 默认清框 / 按键软件去抖 / 路径去硬编码 / 三语硬拦 / 生成链自足）（含 R216）
    ── 用户令（2026-11-13）：「需要我定夺的那些也改」。
    ── ① TF卡信可转发：mypost_fwd_begin 改按 ts 反查条目（mypost_entry_by_ts），
