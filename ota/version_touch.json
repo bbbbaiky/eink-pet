@@ -1,9 +1,9 @@
 {
- "ver": "0.223",
+ "ver": "0.224",
  "size": 1820768,
  "url": "https://ghfast.top/https://raw.githubusercontent.com/bbbbaiky/eink-pet/main/ota/pet_touch.bin",
  "notes": [
-  "R223: key BOOT highlights install btn",
-  "Test OTA resume from v222"
+  "R224: gh-proxy first for faster OTA",
+  "Test resume from v223, slower net"
  ]
 }

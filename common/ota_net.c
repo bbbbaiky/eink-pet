@@ -65,9 +65,13 @@ static const char *NET_TAG = "ota_net";
 #ifndef OTA_NET_GITHUB
 #define OTA_NET_GITHUB "https://raw.githubusercontent.com/bbbbaiky/eink-pet/main/ota"
 #endif
-/* ★2026-11-17 00:59 实机换序：gh-proxy 本次 <1 KB/s（91 秒没过 10%），
-   ghfast 上一轮 199 秒跑完 → 把 ghfast 提到第一，gh-proxy 降为第二。 */
-static const char *const OTA_BASES[] = { OTA_NET_GHPROXY2, OTA_NET_GHPROXY1, OTA_NET_JSDELIVR, OTA_NET_GITHUB };
+/* ★源顺序（按当前链路实测动态调整，R224 换序）：
+   2026-11-17 00:59 曾因 gh-proxy <1KB/s 把 ghfast 提首选；
+   2026-11-17 21:15 复测反转：PC 实测 gh-proxy 521KB/s vs ghfast 112KB/s vs jsdelivr 177KB/s
+   （镜像吞吐随时间剧烈波动，同一源两轮差 10 倍）→ R224 把 gh-proxy 提回第一、ghfast 第二。
+   ★镜像波动是常态，真正的兜底是 R222 的断线续传（换源+Range 从断点续），
+     不要因为某一次慢就反复改顺序；两源都保留，谁通用谁。 */
+static const char *const OTA_BASES[] = { OTA_NET_GHPROXY1, OTA_NET_GHPROXY2, OTA_NET_JSDELIVR, OTA_NET_GITHUB };
 #define OTA_NBASE  (sizeof(OTA_BASES) / sizeof(OTA_BASES[0]))
 static int s_base_used = 0;      /* 本次成功拉到清单的源下标（固件也用它，避免跨源版本不一致） */
 static int s_ord[OTA_NBASE];     /* 按居住地排好的访问顺序：国内→镜像先，海外→GitHub 源站先 */
