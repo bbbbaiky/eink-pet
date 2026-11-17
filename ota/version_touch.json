@@ -1,9 +1,9 @@
 {
- "ver": "0.220",
- "size": 1818832,
+ "ver": "0.221",
+ "size": 1819056,
  "url": "https://ghfast.top/https://raw.githubusercontent.com/bbbbaiky/eink-pet/main/ota/pet_touch.bin",
  "notes": [
-  "R220: OTA release live, test upgrade from 219",
-  "Firmware same as R219, only version bumped"
+  "R221: friend detail button light LUT, no dirty",
+  "OTA release, test upgrade from 219"
  ]
 }

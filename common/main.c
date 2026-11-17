@@ -3269,6 +3269,8 @@ static bool page_force_light_lut(int pg)
     switch (pg) {
     case PG_SET:
     case PG_WIFI_LIST: case PG_WIFI_ITEM: case PG_WIFI_DEL:
+    case PG_FRIEND_ITEM:   /* ★R221：好友详情「修改/删除」两按钮反白 = 照抄 PG_WIFI_ITEM 的实心块，
+                              同档强制轻推（R220 用户报切选中态发脏；10-27 加白名单时漏了这页） */
     case PG_WIFI_CONN_OK: case PG_WIFI_CONN_FAIL:
     case PG_SYNC_OK: case PG_SYNC_FAIL:
     case PG_LAND: case PG_TIME: case PG_ABOUT: case PG_LANG: case PG_ROOM_STYLE:
@@ -8671,9 +8673,9 @@ static void ui_dev_id(char *out, size_t cap)
       改 FW_BUILD 的 R 号时，**同一笔改动里**就把 APP_VER_MINOR 和 PROJECT_VER 一起改掉。
    历史映射：R157~R163 曾显示为 v6.4；R164~R166 曾显示为 v6.5；R167 起回到 v0.167。 */
 #define APP_VER_MAJOR  0
-#define APP_VER_MINOR  220   /* == R 号；v0.220 ↔ R220。次版本号只增不减，1.0 时机由用户定 */
+#define APP_VER_MINOR  221   /* == R 号；v0.221 ↔ R221。次版本号只增不减，1.0 时机由用户定 */
 #define APP_VER_PATCH  0
-#define APP_VERSION     "v0.220"
+#define APP_VERSION     "v0.221"
 
 static void ui_fw_ver(char *out, size_t cap)
 {
@@ -15597,6 +15599,12 @@ void page_render(bool in_page_sel)
         break;
     case PG_FRIEND_ITEM:                         /* ★R92：好友详情（名字 + 6 位码 + 修改/删除）*/
         draw_friend_item_page();
+        /* ★R220 诊断（用户报「切修改/删除选中态发脏」，先实测再定性，不按代码推断）：
+           打进页/切选中那一刻的状态，配合下面 commit 的「表=原局刷(轻推)/中档A_V2(重推)」
+           那行一起看，判断发脏是走了重推表还是局刷次数闸/落屏失败。 */
+        ESP_LOGW(TAG, "[FR_ITEM_PROBE] isel=%d in_page_sel=%d partial_run=%d/%d force_light_now=%d",
+                 g_fr_isel, in_page_sel ? 1 : 0, s_partial_run, PARTIAL_MAX,
+                 s_epd_force_light ? 1 : 0);
         epd_commit(fb_pack(), in_page_sel);
         break;
     case PG_CAT_S1:
@@ -20720,7 +20728,7 @@ typedef struct { const char *q; const char *opt[3]; } pers_q_t;
       若设备仍是 R195 assets，则需 app + assets 一起烧（不擦 NVS）。
 */
 
-#define FW_BUILD  APP_VERSION " · R220"  /* ★R220：**OTA 发布件首次上线（ota/ 目录四件），供 219 实机验证在线升级**；固件功能同 R219（含 R219） */
+#define FW_BUILD  APP_VERSION " · R221"  /* ★R221：**好友详情切「修改/删除」选中态强制轻推（防发脏）**，对齐 WiFi 详情页白名单；含 R220 OTA 上线 */
 /* 历史：R217 = 遗留 9 条收口（go_page 默认清框 / 按键软件去抖 / 路径去硬编码 / 三语硬拦 / 生成链自足）（含 R216）
    ── 用户令（2026-11-13）：「需要我定夺的那些也改」。
    ── ① TF卡信可转发：mypost_fwd_begin 改按 ts 反查条目（mypost_entry_by_ts），
