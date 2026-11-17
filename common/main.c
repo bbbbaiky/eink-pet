@@ -4283,6 +4283,9 @@ static bool     s_ota_online    = false;   /* ★R218：本次 OTA 是否在线�
 static int64_t  s_ota_newest_until = 0;    /* ★R218：已是最新 → 3 秒后自动返回设置 */
 /* ★★2026-10-19 本地升级：SEL 页光标（0=TF卡 / 1=网页）+ 网页升级门户开关 */
 static int      g_ota_sel       = 0;
+/* ★R223（按键板用户令）：「发现新版本」页底部「安装并升级」按钮的选中态
+   （0=未选中 1=反白选中；BOOT 切换，POWER 选中才下载，未选中=返回）。触屏版单段式不用。 */
+static int      g_ota_found_sel = 0;
 bool     s_upg_open      = false;   /* 热点门户已开（离开 WEB 流程要收） */
 bool     s_post_open     = false;   /* 照片导入门户已开（离开要收，2026-10-20） */
 /* ★2c 2026-10-21：导入门户的**来源页** —— 取消/返回时回它（而不是死认功能页）。
@@ -8673,9 +8676,9 @@ static void ui_dev_id(char *out, size_t cap)
       改 FW_BUILD 的 R 号时，**同一笔改动里**就把 APP_VER_MINOR 和 PROJECT_VER 一起改掉。
    历史映射：R157~R163 曾显示为 v6.4；R164~R166 曾显示为 v6.5；R167 起回到 v0.167。 */
 #define APP_VER_MAJOR  0
-#define APP_VER_MINOR  222   /* == R 号；v0.222 ↔ R222。次版本号只增不减，1.0 时机由用户定 */
+#define APP_VER_MINOR  223   /* == R 号；v0.223 ↔ R223。次版本号只增不减，1.0 时机由用户定 */
 #define APP_VER_PATCH  0
-#define APP_VERSION     "v0.222"
+#define APP_VERSION     "v0.223"
 
 static void ui_fw_ver(char *out, size_t cap)
 {
@@ -13081,6 +13084,15 @@ static void draw_ota_found_page(void)
        擦 x62..138 / y167..186（不碰按钮框 y164/y191 两条边线），12px 重画。 */
     fb_fill_white(62, 167, 138, 186);
     fb_text_c(ZF_FONT_TITLE, 100, 171, T("安装并升级"));
+#if !TOUCH_DEMO
+    /* ★R223（按键板用户令）：底部「安装并升级」按钮加选中态 —— BOOT 短按反白（选中），
+       POWER 选中才下载、未选中=返回（见 ota_on_confirm / boot_click）。
+       按钮框 y164..191 烤死在底图，这里只翻框内；同 about_btn_draw 走轻推表防脏点。 */
+    if (g_ota_found_sel == 1) {
+        rr_invert_inside(8, 164, 191, 191, 2);
+        s_epd_force_light = true;
+    }
+#endif
 }
 
 static void draw_ota_newest_page(void)
@@ -14123,6 +14135,16 @@ static bool ota_on_confirm(void)
     case PG_POST_IMPORT:
         return true;                 /* 等手机操作，POWER 无动作（长按 = 取消） */
     case PG_OTA_FOUND:
+        /* ★R223（按键板用户令）：全站惯例「BOOT 反白选中 → POWER 才执行」。
+           按键版未选中(g_ota_found_sel==0)时 POWER = 返回，不误触发下载；
+           触屏版不走这个选中态（tap 直接进），保持原行为。 */
+#if !TOUCH_DEMO
+        if (g_ota_found_sel != 1) {
+            ESP_LOGI(TAG, "安装并升级：未选中（BOOT 反白按钮后再按 POWER）→ 返回");
+            go_page(PG_SET); page_render(false);
+            return true;
+        }
+#endif
         if (s_ota_online) ota_net_start_download();   /* ★R218 在线源 */
         else              ota_start_download();      /* TF卡源 */
         go_page(PG_OTA_PROG);
@@ -16044,6 +16066,7 @@ void go_page(page_t p)
     case PG_BAG_SWAP_CONF: g_bag_btn = -1; break;      /* 背包替换确认 */
     case PG_MYPOST_ACT: s_myp_act_sel = -1; break;     /* 照片信件操作页（收藏/转发/删除）*/
     case PG_MYPOST_DEL: g_btn_sel   = -1; break;       /* 照片信件删除确认 */
+    case PG_OTA_FOUND:  g_ota_found_sel = 0; break;    /* ★R223：发现新版本页进页无选中，BOOT 才反白 */
     /* ★★ 2026-10-11 R26：背包/替换页进页无光标（触屏靠 tap；确认页 g_bag_btn 由入口显式置 -1） */
     case PG_BAG:        g_bag_sel  = -1; g_bag_page = 0; break;   /* ★R30 列表页视窗回第 1 页 */
     case PG_BAG_PICK:   g_bag_page = 0; break;   /* ★★2026-10-12 选择页视窗回第 1 页（保留 g_bag_pick_slot） */
@@ -17593,6 +17616,8 @@ static void boot_click(void)          /* BOOT < 0.5s */
     /* ★★ 2026-10-19 本地升级选择页：两卡循环移框线（N=2 恒不分页） */
     case PG_OTA_SEL:   g_ota_sel = (g_ota_sel + 1) % 2; page_render(true); break;   /* 触屏两卡 0↔1 */
     case PG_OTA_MODE:  g_ota_sel = (g_ota_sel + 1) % 2; page_render(true); break;   /* ★R218 触屏二级两行 */
+    case PG_OTA_FOUND: /* ★R223（按键板）：BOOT 切换「安装并升级」按钮反白（0↔1 选中态） */
+                       g_ota_found_sel = (g_ota_found_sel + 1) % 2; page_render(true); break;
     /* ★★C 商店：换下一件 / 确认页切框（两版同款入口行为） */
     case PG_SHOP:      shop_next(); break;
     case PG_SHOP_CONF: g_shop_conf_sel ^= 1; page_render(true); break;
@@ -20728,7 +20753,7 @@ typedef struct { const char *q; const char *opt[3]; } pers_q_t;
       若设备仍是 R195 assets，则需 app + assets 一起烧（不擦 NVS）。
 */
 
-#define FW_BUILD  APP_VERSION " · R222"  /* ★R222：**OTA 断点续传**（慢链路断线后换源+Range 从断点续下，不再整轮失败）；含 R221 好友页轻推 + DL_PROBE 日志 */
+#define FW_BUILD  APP_VERSION " · R223"  /* ★R223：**按键板「安装并升级」按钮加 BOOT 反白选中态**（未选中 POWER=返回/选中才下载）+ 版本号 +1 供 222 实机验证 OTA 续传；含 R222 续传 + R221 轻推 */
 /* 历史：R217 = 遗留 9 条收口（go_page 默认清框 / 按键软件去抖 / 路径去硬编码 / 三语硬拦 / 生成链自足）（含 R216）
    ── 用户令（2026-11-13）：「需要我定夺的那些也改」。
    ── ① TF卡信可转发：mypost_fwd_begin 改按 ts 反查条目（mypost_entry_by_ts），

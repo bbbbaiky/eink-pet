@@ -1,9 +1,9 @@
 {
- "ver": "0.222",
- "size": 1820752,
+ "ver": "0.223",
+ "size": 1820768,
  "url": "https://ghfast.top/https://raw.githubusercontent.com/bbbbaiky/eink-pet/main/ota/pet_touch.bin",
  "notes": [
-  "R222: OTA resume on disconnect via Range, no restart",
-  "Better luck on slow mobile hotspot links"
+  "R223: key BOOT highlights install btn",
+  "Test OTA resume from v222"
  ]
 }
