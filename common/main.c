@@ -8676,9 +8676,9 @@ static void ui_dev_id(char *out, size_t cap)
       改 FW_BUILD 的 R 号时，**同一笔改动里**就把 APP_VER_MINOR 和 PROJECT_VER 一起改掉。
    历史映射：R157~R163 曾显示为 v6.4；R164~R166 曾显示为 v6.5；R167 起回到 v0.167。 */
 #define APP_VER_MAJOR  0
-#define APP_VER_MINOR  225   /* == R 号；v0.225 ↔ R225。次版本号只增不减，1.0 时机由用户定 */
+#define APP_VER_MINOR  226   /* == R 号；v0.226 ↔ R226。次版本号只增不减，1.0 时机由用户定 */
 #define APP_VER_PATCH  0
-#define APP_VERSION     "v0.225"
+#define APP_VERSION     "v0.226"
 
 static void ui_fw_ver(char *out, size_t cap)
 {
@@ -20753,7 +20753,7 @@ typedef struct { const char *q; const char *opt[3]; } pers_q_t;
       若设备仍是 R195 assets，则需 app + assets 一起烧（不擦 NVS）。
 */
 
-#define FW_BUILD  APP_VERSION " · R225"  /* ★R225：**测试载体**（功能同 R224，版本号 +1 让 224 实机走 gh-proxy 首选验证提速+续传）；含 R224 换序 + R223 按键反白 + R222 续传 */
+#define FW_BUILD  APP_VERSION " · R226"  /* ★R226：**OTA 下载期间禁止空闲深睡**（拔 USB 后下载中途 45s 超时弹回首页+深睡，检查中/下载中续期）；含 R225 + R224 换序 + R223 按键反白 + R222 续传 */
 /* 历史：R217 = 遗留 9 条收口（go_page 默认清框 / 按键软件去抖 / 路径去硬编码 / 三语硬拦 / 生成链自足）（含 R216）
    ── 用户令（2026-11-13）：「需要我定夺的那些也改」。
    ── ① TF卡信可转发：mypost_fwd_begin 改按 ts 反查条目（mypost_entry_by_ts），
@@ -22740,7 +22740,15 @@ void app_main(void)
              * ★★2026-10-12（用户：两版「充电/USB 供电不休眠」行为要统一）：按键版
              *   回灌触屏版同款（触屏版 2026-10-05 就修了这层，按键版一直漏着 ——
              *   实机表现 = USB 调试时按键版每 60s 自动回首页、触屏版不会）。 */
-            if (g_page == PG_POST_IMPORT) {
+            /* ★R226：OTA 检查中/下载中**禁止空闲超时回首页+深睡**（用户拔掉 USB 实测：
+               下载要几分钟、期间无按键，45s 会话到点就 go_page(PG_HOME)+深睡 → 升级中断。
+               插 USB 时因 usb_serial_jtag_is_connected() 走「只续期不睡」分支才没暴露。
+               ⚠ 用状态而非页面判断：覆盖检查/下载两个异步阶段，与页面渲染解耦；
+                 FOUND(等确认)/结果页仍按全站惯例 45s 超时回主页。 */
+            const ota_state_t _ota_st = ota_status()->st;
+            if (_ota_st == OTA_CHECKING || _ota_st == OTA_DOWNLOADING) {
+                g_session_until = now_sec + 600;   /* 长任务每 10 分钟续期（等同不退） */
+            } else if (g_page == PG_POST_IMPORT) {
                 /* ★2026-10-22 用户令：照片导入页（热点+网页）**不许空闲超时回首页/深睡** ——
                    用户可能正在手机上选图/裁剪/上传，45s 太短会把它踢回首页、热点也跟着关。
                    此页只要还在就每 10 分钟续期一次（等同不退）；离开靠页面「按住 3 秒返回」/长按 BOOT。 */
@@ -23791,7 +23799,15 @@ static void touch_demo_run(void)
              *   ⇒ 修法：USB 连着时**根本不该有"无操作超时"**（那是给电池模式省电用的），
              *     直接续期把超时推后，页面留在原地不动。
              *   注：这也是为什么用户体感「没有过 45s」—— USB 下实际周期是兜底的 60s。 */
-            if (g_page == PG_POST_IMPORT) {
+            /* ★R226：OTA 检查中/下载中**禁止空闲超时回首页+深睡**（用户拔掉 USB 实测：
+               下载要几分钟、期间无按键，45s 会话到点就 go_page(PG_HOME)+深睡 → 升级中断。
+               插 USB 时因 usb_serial_jtag_is_connected() 走「只续期不睡」分支才没暴露。
+               ⚠ 用状态而非页面判断：覆盖检查/下载两个异步阶段，与页面渲染解耦；
+                 FOUND(等确认)/结果页仍按全站惯例 45s 超时回主页。 */
+            const ota_state_t _ota_st = ota_status()->st;
+            if (_ota_st == OTA_CHECKING || _ota_st == OTA_DOWNLOADING) {
+                g_session_until = now_sec + 600;   /* 长任务每 10 分钟续期（等同不退） */
+            } else if (g_page == PG_POST_IMPORT) {
                 /* ★2026-10-22 用户令：照片导入页（热点+网页）**不许空闲超时回首页/深睡** ——
                    用户可能正在手机上选图/裁剪/上传，45s 太短会把它踢回首页、热点也跟着关。
                    此页只要还在就每 10 分钟续期一次（等同不退）；离开靠页面「按住 3 秒返回」/长按 BOOT。 */

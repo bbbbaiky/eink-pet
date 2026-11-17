@@ -1,9 +1,9 @@
 {
- "ver": "0.225",
- "size": 1792928,
+ "ver": "0.226",
+ "size": 1792960,
  "url": "https://ghfast.top/https://raw.githubusercontent.com/bbbbaiky/eink-pet/main/ota/pet_key.bin",
  "notes": [
-  "R225: test gh-proxy first speed from 224",
-  "resume still active"
+  "R226: no deep-sleep during OTA download",
+  "unplugged USB no longer aborts upgrade"
  ]
 }
