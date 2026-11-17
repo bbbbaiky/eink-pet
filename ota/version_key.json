@@ -1,9 +1,9 @@
 {
- "ver": "0.229",
- "size": 1793264,
+ "ver": "0.231",
+ "size": 1793952,
  "url": "https://gh-proxy.com/https://raw.githubusercontent.com/bbbbaiky/eink-pet/main/ota/pet_key.bin",
  "notes": [
-  "R229: journey shows real place name",
-  "slow mail stays in same city"
+  "R231: slow mail keeps city, trip in sync",
+  "journey shows real place (Ningxia)"
  ]
 }

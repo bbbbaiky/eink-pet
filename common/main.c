@@ -8680,9 +8680,9 @@ static void ui_dev_id(char *out, size_t cap)
       改 FW_BUILD 的 R 号时，**同一笔改动里**就把 APP_VER_MINOR 和 PROJECT_VER 一起改掉。
    历史映射：R157~R163 曾显示为 v6.4；R164~R166 曾显示为 v6.5；R167 起回到 v0.167。 */
 #define APP_VER_MAJOR  0
-#define APP_VER_MINOR  229   /* == R 号；v0.229 ↔ R229。次版本号只增不减，1.0 时机由用户定 */
+#define APP_VER_MINOR  231   /* == R 号；v0.231 ↔ R231。次版本号只增不减，1.0 时机由用户定 */
 #define APP_VER_PATCH  0
-#define APP_VERSION     "v0.229"
+#define APP_VERSION     "v0.231"
 
 static void ui_fw_ver(char *out, size_t cap)
 {
@@ -12256,6 +12256,11 @@ static int jtrip_trip_posts(uint16_t tid, uint8_t ed, uint16_t *posts, uint8_t *
            原来直接照抄流水，同一张片就在屏上出现两遍、还把页数顶成 2 页。
            ⇒ 按 post 下标去重（保留最早那条的时间序位置），并挡住越界的脏下标。 */
         if (r->post >= N_POST && r->post != API_POST_IDX) continue;
+        /* ★R230（用户令）：**笔友来信不是猫的旅程** —— 那一趟寄出的笔友信不许出现在行程详情里。
+           用户原话：「环礁不应该出现在旅程里，因为它是笔友来信，笔友来信就不是猫的旅程」。
+           实机数据（11-18 读 NVS）：一趟 tid=39824 记了 4 条 → 237（环礁/小鸟邮局）+ 57×3，
+           详情页去重后就成了「环礁 + 西夏王陵」两张，其中环礁那张本来就不该在。 */
+        if (post_sender_kind(r->post) != POST_SENDER_CAT) continue;
         bool dup = false;
         for (int k = 0; k < n; ++k) if (posts[k] == r->post) { dup = true; break; }
         if (dup) continue;
@@ -12264,6 +12269,65 @@ static int jtrip_trip_posts(uint16_t tid, uint8_t ed, uint16_t *posts, uint8_t *
         ++n;
     }
     return n;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * ★★R231（用户令）：慢递「换片」要**回写行程流水**，换掉的/舍弃的都得对得上。
+ * ---------------------------------------------------------------------------
+ * 用户原话：「换出来的片只换同城的……同城的话就进同一条的流水嘛；不是同城、已经满了就舍弃了，
+ *   舍弃了他就不进流水」。
+ * 背景：慢递在寄出那一刻就把 post 下标写进了流水（loot_system.c: jtrip_note_mail）；一天后
+ *   到期时若原片已被别的途径收到，post_slow_tick 会换成同城另一张（R229 起限同城），
+ *   或者同城没片了直接丢弃 —— 但原来**流水不动**，于是行程详情显示的是没到手的 A，
+ *   信箱里躺着 B（实机 11-18：流水记西夏王陵，到手是厦门，用户就是被这个绕住的）。
+ * 修法：这两个入口由 post_system.c 反向调用（jtrip 是本文件的静态数据，只能由这里改）：
+ *   · jtrip_swap_post(old,new)  —— 换片成功：把**最近一条** post==old 的流水就地改成 new，
+ *                                  趟号/天数/目的地全不动 ⇒ 仍是"同一条流水"；
+ *   · jtrip_drop_post(old)      —— 同城无片被丢弃：把那条流水**删掉**（没到手的片不该占位）。
+ * ⚠ 只在「最近一条」上动手：同一张片可能在别的趟里也寄过，那些记录必须原样保留。
+ * ═══════════════════════════════════════════════════════════════════════════ */
+void jtrip_swap_post(int old_idx, int new_idx)
+{
+    if (old_idx < 0 || new_idx < 0 || old_idx == new_idx) return;
+    jtrip_load();
+    int tgt = -1;
+    uint16_t bt = 0;
+    for (int i = 0; i < s_jt.n; ++i) {
+        if (s_jt.r[i].post != (uint16_t)old_idx) continue;
+        if (tgt < 0 || (int16_t)(s_jt.r[i].tid - bt) >= 0) { bt = s_jt.r[i].tid; tgt = i; }
+    }
+    if (tgt < 0) return;                       /* 这张片没有流水（不是旅途中寄的）→ 无事可做 */
+    s_jt.r[tgt].post = (uint16_t)new_idx;
+    loot_nvs_set_blob("jtrip", &s_jt, sizeof(s_jt));
+    ESP_LOGW(TAG, "★ 慢递换片已回写流水：post %d → %d（趟 tid=%u 不变）",
+             old_idx, new_idx, (unsigned)s_jt.r[tgt].tid);
+}
+
+void jtrip_drop_post(int post_idx)
+{
+    if (post_idx < 0) return;
+    jtrip_load();
+    int tgt = -1;
+    uint16_t bt = 0;
+    for (int i = 0; i < s_jt.n; ++i) {
+        if (s_jt.r[i].post != (uint16_t)post_idx) continue;
+        if (tgt < 0 || (int16_t)(s_jt.r[i].tid - bt) >= 0) { bt = s_jt.r[i].tid; tgt = i; }
+    }
+    if (tgt < 0) return;
+    /* 环形缓冲删一条：按时间序重建（tmp 用 static，不占栈） */
+    static jtrip_rec_t tmp[JTRIP_N];
+    int m = 0;
+    for (int i = 0; i < s_jt.n; ++i) {
+        const int slot = jtrip_slot(i);
+        if (slot == tgt) continue;
+        tmp[m++] = s_jt.r[slot];
+    }
+    memset(s_jt.r, 0, sizeof(s_jt.r));
+    if (m > 0) memcpy(s_jt.r, tmp, (size_t)m * sizeof(jtrip_rec_t));
+    s_jt.head = (uint16_t)(m % JTRIP_N);
+    s_jt.n    = (uint16_t)m;
+    loot_nvs_set_blob("jtrip", &s_jt, sizeof(s_jt));
+    ESP_LOGW(TAG, "★ 慢递被舍弃 → 已从流水删掉 post %d 那条（剩 %d 条）", post_idx, m);
 }
 
 /* ★R135：某一天寄出的片（最多 2 张）。一页 = 一天，所以按天取。 */
@@ -12461,9 +12525,45 @@ static int map_rows(int *idx, int cap)
     return n < cap ? n : cap;
 }
 
+/* ★★R230（用户令）：站名改取**明信片上那个"地区"**，不再用 `city` 字段。
+   用户原话：「这个是银川，但明信片上写的是西夏王陵……它应该显示宁夏」，并给了两条独立判据：
+   「我有两张明信片，一张西夏王陵、一张厦门，那它应该是两个地点：宁夏、厦门」。
+   `place` 的固定形态是「景点 地区 天气」（570/586 条如此），所以：
+     · 3 段及以上 → 取**倒数第二段**（天气前那段）：西夏王陵 宁夏 晴 → 宁夏；
+                     龙井 浙江 杭州 晴 → 杭州；
+     · 只有 2 段（"大连 晴" / "南京南站 晴" —— 这类没有地区段）→ 退回 `city`，
+       否则会把「南京南站」这种景点名当站名，反而比 city（南京）差；
+     · 取不到 → 返回空串（不显示该行）。
+   ⚠ 只是把地点**口径**从 city 换成 place，不影响任何数据表。 */
+static const char *map_place_region(const post_t *p)
+{
+    static char buf[24];
+    buf[0] = 0;
+    if (!p || !p->place || !p->place[0]) return buf;
+    const char *seg[4];
+    int seglen[4], ns = 0;
+    const char *q = p->place;
+    while (ns < 4 && *q) {
+        const char *sp = strchr(q, ' ');
+        const int len = sp ? (int)(sp - q) : (int)strlen(q);
+        seg[ns] = q; seglen[ns] = len; ++ns;
+        if (!sp) break;
+        q = sp + 1;
+    }
+    const char *pick = NULL;
+    int picklen = 0;
+    if (ns >= 3) { pick = seg[ns - 2]; picklen = seglen[ns - 2]; }
+    if ((!pick || picklen <= 0) && p->city && p->city[0]) { pick = p->city; picklen = (int)strlen(p->city); }
+    if (!pick || picklen <= 0) return buf;
+    if (picklen > (int)sizeof(buf) - 1) picklen = (int)sizeof(buf) - 1;
+    memcpy(buf, pick, (size_t)picklen);
+    buf[picklen] = 0;
+    return buf;
+}
+
 /* ★R229（用户令）：删掉 `NEAR_PLACE[3] = {"上海","黄山","舟山"}` —— 那三个是**当年看版式的
    测试地名**，不是真实数据，不许再当回落值（用户原话：「不回落什么上海黄山舟山，这是之前的
-   一个测试数据」）。现在近郊行名的**唯一来源** = 该系列里最近一趟「非笔友信」那张片的 `city`；
+   一个测试数据」）。现在近郊行名的**唯一来源** = 该系列里最近一趟「非笔友信」那张片的地区；
    找不到就返回空串 ⇒ 这一行不显示（宁可少一行，也不编一个地名顶上）。 */
 static const char *map_near_name(int series)
 {
@@ -12475,16 +12575,20 @@ static const char *map_near_name(int series)
     for (int i = 0; i < s_jt.n; ++i) {
         const jtrip_rec_t *r = &s_jt.r[i];
         if (r->ed != ed) continue;
-        /* ★R229 修（用户报「旅程标题居然显示小鸟邮局」）：内置 47 张里有 8 张笔友来信把**寄信人**
-           塞进了 city（"小鸟邮局"/"蝴蝶邮局"，数据一条没改、只在显示侧识别）。原来直接拿最近一趟
-           那张片的 city 当站名 ⇒ 那趟若寄的是笔友信，行标题就成了「小鸟邮局」，地点消失。
-           这里跳过笔友信，取最近一趟**普通片**的地名。 */
+        /* ★R229 修（用户报「旅程标题居然显示小鸟邮局」）：内置池里有 101 张「笔友邮局/中性地点」
+           通配片，其中一部分把**寄信人**塞进了 city（"小鸟邮局"/"蝴蝶邮局"）。原来直接拿最近一趟
+           那张片的 city 当站名 ⇒ 那趟若寄的是笔友信，行标题就成了「小鸟邮局」。
+           ★R230 起笔友信根本不写进行程流水（见 loot_system.c / jtrip_trip_posts），
+           这里再挡一道，兼容这次升级前已经写进去的老记录。 */
         if (post_sender_kind(r->post) != POST_SENDER_CAT) continue;
         if (best_i < 0 || (int16_t)(r->tid - best) > 0) { best = r->tid; best_i = i; }
     }
     if (best_i >= 0) {
         const post_t *p = post_at(s_jt.r[best_i].post);
-        if (p && p->city[0]) return p->city;
+        if (p) {
+            const char *nm = map_place_region(p);
+            if (nm[0]) return nm;
+        }
     }
     return "";                 /* ★R229：没有可信地名 → 不显示该行（不再回落测试地名） */
 }
@@ -20763,7 +20867,7 @@ typedef struct { const char *q; const char *opt[3]; } pers_q_t;
       若设备仍是 R195 assets，则需 app + assets 一起烧（不擦 NVS）。
 */
 
-#define FW_BUILD  APP_VERSION " · R229"  /* ★R229：**旅程站名与慢递换片**（①近郊行名跳过笔友信、删测试地名回落 ②慢递只在同城换片、同城满则丢弃）；含 R228 三修 + R226 防休眠 + R224 换序 + R223 反白 + R222 续传 */
+#define FW_BUILD  APP_VERSION " · R231"  /* ★R231：**慢递换片回写流水**（换片进同一条流水、同城满被舍弃则删掉那条）+ 含 R230 旅程对齐（笔友信不进行程 / 站名取明信片地区）+ R229 同城换片 + R228 三修 */
 /* 历史：R217 = 遗留 9 条收口（go_page 默认清框 / 按键软件去抖 / 路径去硬编码 / 三语硬拦 / 生成链自足）（含 R216）
    ── 用户令（2026-11-13）：「需要我定夺的那些也改」。
    ── ① TF卡信可转发：mypost_fwd_begin 改按 ts 反查条目（mypost_entry_by_ts），

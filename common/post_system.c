@@ -1962,6 +1962,11 @@ int post_slow_pending(void)
     return post_slow_load(q);
 }
 
+/* ★R231：换片要回写行程流水（jtrip 是 main.c 的静态数据，只能由那边改）——
+   定义在 main.c 的 jtrip_trip_posts 之后，两版共用。 */
+void jtrip_swap_post(int old_idx, int new_idx);
+void jtrip_drop_post(int post_idx);
+
 /* 到期投放。调用点三处：post_load 末尾（开机）、clock_rebase（每次校时）、exp_day_mail 末尾。
    幂等：投完就清队列，同一天重复调用不会重复投。 */
 int post_slow_tick(int today)
@@ -2005,9 +2010,14 @@ int post_slow_tick(int today)
             if (a < 0) {
                 ESP_LOGW(TAG, "★ 慢递到期：同城「%s」已无新片 → 丢弃这一条（不跨城、不重复）",
                          city ? city : "?");
+                /* ★R231（用户令）：舍弃的片**不该留在行程里** —— 把寄出时写的那条流水删掉。 */
+                jtrip_drop_post(idx);
                 continue;
             }
             ESP_LOGW(TAG, "★ 慢递换片（限同城）：%d → %d（%s）", idx, a, city);
+            /* ★R231（用户令）：换出来的片**进同一条流水**（趟号/第几天都不动，只把片号换掉），
+               否则行程详情显示的是没到手的原片、跟信箱永远对不上。 */
+            jtrip_swap_post(idx, a);
         }
         pick[nd] = a;
         pick_due[nd] = due;
