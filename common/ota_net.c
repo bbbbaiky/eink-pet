@@ -104,6 +104,10 @@ static void ota_net_build_order(void)
 #define OTA_NET_BUF     4096
 #define OTA_NET_TO_MS   15000
 #define OTA_DL_CHUNK    16384   /* ★R218：4K → 16K，镜像/跨国链路下少一半 TLS 记录往返（实测 199s 的下载靠这个提速） */
+/* ★R222：慢链路断线续传上限。实测手机热点 5~9KB/s，84s 才 19%，
+   然后 read 返回负错误码断链。每断一次换个源 + Range 从断点续，最多 8 次；
+   ota_net_feed 是顺序累加写（槽里已有 total 字节），续传数据从 total 开始喂天然对齐。 */
+#define OTA_DL_RESUME_MAX  8
 
 static char s_manifest_url[256];
 static char s_fw_url[256];
@@ -292,19 +296,108 @@ static void ota_net_download_body(void)
     }
     int total = 0;
     bool ok = true;
+    /* ★R222 下载诊断 + 断点续传（手机热点实测 5~9KB/s、84s 到 19% 后 read 负错误码断链）：
+       每 5 秒打一行 已下字节/百分比/耗时/速率；read<=0 时不再整轮失败，
+       而是**换下一个源 + HTTP Range 从 total 偏移续传**（槽里已有 total 字节，天然对齐）。
+       抓法：串口 grep "DL_PROBE|RESUME"。 */
+    uint32_t t_start = esp_log_timestamp();
+    uint32_t t_lastlog = t_start;
+    int resume_n = 0;
+    int cur_src = s_base_used;   /* 当前在 s_ord 里的源序号 */
+    ESP_LOGW(NET_TAG, "[DL_PROBE] START src=%s expect=%d chunk=%d timeout=%dms",
+             OTA_BASES[s_ord[cur_src]], s_expect_size, OTA_DL_CHUNK, OTA_NET_TO_MS);
     while (total < s_expect_size) {
         int want = s_expect_size - total;
         if (want > OTA_DL_CHUNK) want = OTA_DL_CHUNK;
         int got = esp_http_client_read(cli, (char *)chunk, want);
-        if (got <= 0) { ok = false; break; }
-        if (!ota_net_feed(chunk, (size_t)got)) { ok = false; break; }
+        if (got <= 0) {
+            ESP_LOGW(NET_TAG, "[DL_PROBE] READ_FAIL got=%d total=%d/%d (%d%%) elapsed=%ums resume=%d/%d",
+                     got, total, s_expect_size, 100 * total / s_expect_size,
+                     esp_log_timestamp() - t_start, resume_n, OTA_DL_RESUME_MAX);
+            /* ★R222 断点续传：关掉断链的连接，轮转下一个源，从 total 偏移重开。
+               注意：ota_net_begin 的槽句柄**不重建**（重建会丢已写的前缀）。 */
+            bool resumed = false;
+            if (resume_n < OTA_DL_RESUME_MAX) {
+                esp_http_client_close(cli);
+                esp_http_client_cleanup(cli);
+                cli = NULL;
+                for (int k = 1; k <= (int)OTA_NBASE && !cli; ++k) {
+                    int sb = (cur_src + k) % (int)OTA_NBASE;    /* 从下一个源开始轮转（s_ord 下标） */
+                    char url[256];
+                    snprintf(url, sizeof(url), "%s/%s", OTA_BASES[s_ord[sb]], fname);
+                    esp_http_client_config_t rcfg = {
+                        .url = url,
+                        .crt_bundle_attach = esp_crt_bundle_attach,
+                        .timeout_ms = OTA_NET_TO_MS,
+                        .disable_auto_redirect = false,
+                        .max_redirection_count = 5,
+                    };
+                    esp_http_client_handle_t rh = esp_http_client_init(&rcfg);
+                    if (!rh) continue;
+                    char range_hdr[64];
+                    snprintf(range_hdr, sizeof(range_hdr), "bytes=%d-", total);
+                    esp_http_client_set_header(rh, "Range", range_hdr);
+                    if (esp_http_client_open(rh, 0) != ESP_OK) { esp_http_client_cleanup(rh); continue; }
+                    int rc = esp_http_client_fetch_headers(rh);
+                    int code = esp_http_client_get_status_code(rh);
+                    /* Range 必须回 206，且 Content-Range 起点 == total（防源不认 Range 从头发） */
+                    if (code != 206) {
+                        ESP_LOGW(NET_TAG, "RESUME 源 %s 回 HTTP %d（非 206）→ 试下一个",
+                                 OTA_BASES[s_ord[sb]], code);
+                        esp_http_client_close(rh); esp_http_client_cleanup(rh); continue;
+                    }
+                    /* rc 是本次响应体长度 = 期望剩余 */
+                    if (rc <= 0 || rc > s_expect_size - total) {
+                        ESP_LOGW(NET_TAG, "RESUME 源 %s 剩余长度 %d 异常（应 <=%d）→ 试下一个",
+                                 OTA_BASES[s_ord[sb]], rc, s_expect_size - total);
+                        esp_http_client_close(rh); esp_http_client_cleanup(rh); continue;
+                    }
+                    /* ★防不规范源：206 但 Content-Range 起点不是 total（例如从 0 重发）
+                       → 会把前缀重复喂进槽、固件错乱。校验 "bytes <total>-" 前缀。 */
+                    char *crange = NULL;
+                    if (esp_http_client_get_header(rh, "Content-Range", &crange) == ESP_OK && crange) {
+                        char want_cr[48];
+                        snprintf(want_cr, sizeof(want_cr), "bytes %d-", total);
+                        if (strncmp(crange, want_cr, strlen(want_cr)) != 0) {
+                            ESP_LOGW(NET_TAG, "RESUME 源 %s Content-Range='%s' 起点非 %d → 试下一个",
+                                     OTA_BASES[s_ord[sb]], crange, total);
+                            esp_http_client_close(rh); esp_http_client_cleanup(rh); continue;
+                        }
+                    }
+                    cli = rh;
+                    cur_src = sb;
+                    resume_n++;
+                    resumed = true;
+                    ESP_LOGW(NET_TAG, "★★ RESUME 成功：源 %s 从 %d B 续传（剩余 %d B，第 %d 次）",
+                             OTA_BASES[s_ord[sb]], total, rc, resume_n);
+                }
+            }
+            if (!resumed) { ok = false; break; }   /* 额度用尽 / 所有源都不认 Range → 真失败 */
+            continue;                               /* 用新 cli 从 total 继续读 */
+        }
+        if (!ota_net_feed(chunk, (size_t)got)) {
+            ESP_LOGE(NET_TAG, "[DL_PROBE] FEED_FAIL got=%d total=%d/%d (%d%%) elapsed=%ums",
+                     got, total, s_expect_size, 100 * total / s_expect_size,
+                     esp_log_timestamp() - t_start);
+            ok = false; break;
+        }
         total += got;
         ota_net_progress(100 * total / s_expect_size);
+        uint32_t now = esp_log_timestamp();
+        if (now - t_lastlog >= 5000) {
+            uint32_t el = now - t_start;
+            ESP_LOGW(NET_TAG, "[DL_PROBE] %d/%d (%d%%) elapsed=%ums rate=%uKB/s resume=%d",
+                     total, s_expect_size, 100 * total / s_expect_size, el,
+                     el ? (uint32_t)(total / 1024) * 1000 / el : 0, resume_n);
+            t_lastlog = now;
+        }
         /* ★2026-11-17：这里原来每个 chunk 调一次 esp_task_wdt_reset()，但 OTA 任务
            **没有** esp_task_wdt_add() 订阅 → 每调一次就打印
            `task_wdt: esp_task_wdt_reset(707): task not found` 并 fflush，
            1.8MB/16K = 110 次，白耗时间还把日志刷满。未订阅就不喂，删掉。 */
     }
+    ESP_LOGW(NET_TAG, "[DL_PROBE] END ok=%d total=%d/%d elapsed=%ums resume=%d",
+             ok ? 1 : 0, total, s_expect_size, esp_log_timestamp() - t_start, resume_n);
     free(chunk);
     esp_http_client_close(cli);
     esp_http_client_cleanup(cli);

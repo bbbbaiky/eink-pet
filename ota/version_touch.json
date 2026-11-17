@@ -1,9 +1,9 @@
 {
- "ver": "0.221",
- "size": 1819056,
+ "ver": "0.222",
+ "size": 1820752,
  "url": "https://ghfast.top/https://raw.githubusercontent.com/bbbbaiky/eink-pet/main/ota/pet_touch.bin",
  "notes": [
-  "R221: friend detail button light LUT, no dirty",
-  "OTA release, test upgrade from 219"
+  "R222: OTA resume on disconnect via Range, no restart",
+  "Better luck on slow mobile hotspot links"
  ]
 }
