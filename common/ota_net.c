@@ -261,6 +261,7 @@ static void ota_net_download_body(void)
     esp_http_client_handle_t cli = NULL;
     const char *slash = strrchr(s_fw_url, '/');
     const char *fname = slash ? slash + 1 : "firmware.bin";
+    int src_used = -1;                 /* ★R228：本次真正锁定的源（s_ord 下标），续传轮转要用它 */
     for (int k = 0; k < (int)OTA_NBASE && !cli; ++k) {
         int b = (s_base_used + k) % (int)OTA_NBASE;   /* 从清单成功的源起，绕回开头再兜底 */
         char url[256];
@@ -286,6 +287,7 @@ static void ota_net_download_body(void)
             esp_http_client_close(h); esp_http_client_cleanup(h); continue;
         }
         cli = h;   /* 这个源可用，锁定它开始写 */
+        src_used = b;   /* ★R228：记下真正用上的源，续传从这里轮转 */
     }
     if (!cli) { ota_net_fail("两个源都下不到固件"); return; }
     /* 通过 ota_up 导出的流式写入 API（内部校验 magic + esp_ota_end） */
@@ -307,7 +309,10 @@ static void ota_net_download_body(void)
     uint32_t t_start = esp_log_timestamp();
     uint32_t t_lastlog = t_start;
     int resume_n = 0;
-    int cur_src = s_base_used;   /* 当前在 s_ord 里的源序号 */
+    /* ★R228 修：原来写的是 s_base_used（**清单**成功的源），但下载起始源可能因
+       清单源拉不到固件而绕到别的源（上面 src_used）⇒ 续传轮转会先原地重试刚断的那个源，
+       白烧一次 15s 超时。以实际下载源为准。 */
+    int cur_src = (src_used >= 0) ? src_used : s_base_used;   /* 当前在 s_ord 里的源序号 */
     ESP_LOGW(NET_TAG, "[DL_PROBE] START src=%s expect=%d chunk=%d timeout=%dms",
              OTA_BASES[s_ord[cur_src]], s_expect_size, OTA_DL_CHUNK, OTA_NET_TO_MS);
     while (total < s_expect_size) {
@@ -403,7 +408,12 @@ static void ota_net_download_body(void)
     ESP_LOGW(NET_TAG, "[DL_PROBE] END ok=%d total=%d/%d elapsed=%ums resume=%d",
              ok ? 1 : 0, total, s_expect_size, esp_log_timestamp() - t_start, resume_n);
     free(chunk);
-    esp_http_client_close(cli);
+    /* ★R228 修（实机崩溃路径）：续传失败时 cli 已被置 NULL（见上面 resume 段），
+       而 esp_http_client_close() **没有 NULL 保护**（IDF v5.5 直接读 client->state，
+       esp_http_client_cleanup 才有）。原来无条件 close ⇒ 慢链路一次续传失败
+       （8 次额度用尽 / 所有源都不认 Range）就是空指针硬崩溃，屏幕停在进度页重启，
+       用户看到的是「升级重启了但版本没变」。改成有则关、cleanup 自带 NULL 保护。 */
+    if (cli) esp_http_client_close(cli);
     esp_http_client_cleanup(cli);
     if (!ok || total != s_expect_size) {
         ota_net_abort(); ota_net_fail("下载中断"); return;

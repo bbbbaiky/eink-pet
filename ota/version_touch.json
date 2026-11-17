@@ -1,9 +1,9 @@
 {
- "ver": "0.227",
- "size": 1820800,
- "url": "https://ghfast.top/https://raw.githubusercontent.com/bbbbaiky/eink-pet/main/ota/pet_touch.bin",
+ "ver": "0.228",
+ "size": 1820832,
+ "url": "https://gh-proxy.com/https://raw.githubusercontent.com/bbbbaiky/eink-pet/main/ota/pet_touch.bin",
  "notes": [
-  "R227: test carrier, verify no deepsleep on USB off",
-  "from 226, unplugged"
+  "R228: fix OTA resume crash, cleaner refresh",
+  "Do not sleep during OTA download"
  ]
 }

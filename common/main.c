@@ -3273,6 +3273,10 @@ static bool page_force_light_lut(int pg)
                               同档强制轻推（R220 用户报切选中态发脏；10-27 加白名单时漏了这页） */
     case PG_WIFI_CONN_OK: case PG_WIFI_CONN_FAIL:
     case PG_SYNC_OK: case PG_SYNC_FAIL:
+    /* ★R228 补：R223 给按键板「发现新版本」页的「安装并升级」按钮加了 BOOT 反白， 
+       但当时**没把该页加进本白名单** —— 取消选中（反白→白）时那块实心黑走重推表，
+       边缘发散留脏块，正是 R220/R221（好友详情页）同一个坑。同 PG_WIFI_ITEM 一并强制轻推。 */
+    case PG_OTA_FOUND:
     case PG_LAND: case PG_TIME: case PG_ABOUT: case PG_LANG: case PG_ROOM_STYLE:
         return true;
     default:
@@ -8676,9 +8680,9 @@ static void ui_dev_id(char *out, size_t cap)
       改 FW_BUILD 的 R 号时，**同一笔改动里**就把 APP_VER_MINOR 和 PROJECT_VER 一起改掉。
    历史映射：R157~R163 曾显示为 v6.4；R164~R166 曾显示为 v6.5；R167 起回到 v0.167。 */
 #define APP_VER_MAJOR  0
-#define APP_VER_MINOR  227   /* == R 号；v0.227 ↔ R227。次版本号只增不减，1.0 时机由用户定 */
+#define APP_VER_MINOR  228   /* == R 号；v0.228 ↔ R228。次版本号只增不减，1.0 时机由用户定 */
 #define APP_VER_PATCH  0
-#define APP_VERSION     "v0.227"
+#define APP_VERSION     "v0.228"
 
 static void ui_fw_ver(char *out, size_t cap)
 {
@@ -20753,7 +20757,7 @@ typedef struct { const char *q; const char *opt[3]; } pers_q_t;
       若设备仍是 R195 assets，则需 app + assets 一起烧（不擦 NVS）。
 */
 
-#define FW_BUILD  APP_VERSION " · R227"  /* ★R227：**测试载体**（功能同 R226，版本号+1 让 226 实机有版本可升，验证拔 USB 下载不休眠）；含 R226 防休眠 + R224 换序 + R223 按键反白 + R222 续传 */
+#define FW_BUILD  APP_VERSION " · R228"  /* ★R228：**全量复查 + 3 处修复**（①续传失败 NULL close 崩溃 ②续传轮转起错源 ③OTA_FOUND 页漏进轻推白名单）；含 R226 防休眠 + R224 换序 + R223 按键反白 + R222 续传 */
 /* 历史：R217 = 遗留 9 条收口（go_page 默认清框 / 按键软件去抖 / 路径去硬编码 / 三语硬拦 / 生成链自足）（含 R216）
    ── 用户令（2026-11-13）：「需要我定夺的那些也改」。
    ── ① TF卡信可转发：mypost_fwd_begin 改按 ts 反查条目（mypost_entry_by_ts），
