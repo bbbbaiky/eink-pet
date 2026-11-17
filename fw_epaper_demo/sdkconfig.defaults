@@ -1,0 +1,66 @@
+# Waveshare ESP32-S3-ePaper-1.54 (V2) —— ESP32-S3-PICO-1-N8R8
+CONFIG_IDF_TARGET="esp32s3"
+
+# Flash：8MB，QIO + 80MHz
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+
+# 单 app 分区表，本固件很小
+# 分区表：**自定义**（partitions.csv）—— 2026-09-22 用户拍板把 factory 从 1500K 扩到 4M。
+# 为什么不继续用 SINGLE_APP_LARGE：它只给 1500K，中文字表(183KB)装完后 app 占 91.5%、
+# 只剩 127KB，后续重做页面必撞墙；而本板 flash 8MB，single_app_large 后面 6.5MB 全是空的。
+# ★ 改这里要跟着改 sdkconfig（本仓库 sdkconfig 是入库的），否则重配会退回 1500K。
+# ★ nvs/phy_init/factory 三个偏移与原来一致 → 只烧分区表+app，NVS/WiFi 不丢。
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# 板上只引出原生 USB，日志走 USB-Serial-JTAG
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# 按键轮询要 20ms 精度
+CONFIG_FREERTOS_HZ=1000
+
+# 关掉 ccache：它的 C++ std::filesystem 处理不了中文工程路径，
+# 会抛 "Cannot convert character sequence: Illegal byte sequence"
+CONFIG_CCACHE=n
+CONFIG_CCACHE_ENABLE=n
+
+# ★R197：main 栈 12 KiB 装不下 ESP32-S3 ROM tinfl 的 10.99 KiB 解压器结构
+#   （实机 R196 循环重启 5 次 / "A stack overflow in task main"）。
+#   ⚠ 两份 sdkconfig 与两份 sdkconfig.defaults 必须同改，否则从零重建被 defaults 写回 12288。
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=24576
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+# ⚠ 2026-10-20 实测结论（别再试）：**本工具链（ESP-IDF v5.5.3）没有 CONFIG_COMPILER_LTO 这个选项**
+#   —— 全 IDF 目录 grep "COMPILER_LTO" 零命中。往 sdkconfig 里手加这一行，cmake 重配时会
+#   把它**静默剔除**（实测：加完重编，build.ninja 里 -flto 计数仍为 0、固件体积一字节不变）。
+#   所以"开 LTO 省 3%~8%"这条路在当前工具链上**不存在**。
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# CPU 240MHz —— 与小智（已在本板跑通）一致
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
+
+# PSRAM：本板是 ESP32-S3-PICO-1-N8R8（8MB Octal PSRAM）。
+# 原先为了省事把 PSRAM 裁掉了；但小智（同板已跑通）是启用的，并且开了 64B 数据
+# cache 行。这是两者最后一处硬性配置差异，按小智原样补齐。
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=102400
+CONFIG_SPIRAM_MEMTEST=n
+# ★R198：允许 EXT_RAM_BSS_ATTR 把本项目静态缓冲放到 PSRAM（关掉即整体回退）
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
+
+# cache 尺寸/行宽 —— 与小智一致
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+
+# ★★ 2026-10-17 OTA：新固件首次启动**不自动标记 valid** ⇒ 起不来会自动回滚旧分区
+#    （方案 §六.5：必须开，否则 OTA 失败 = 变砖）
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# 在线升级吞吐：5.7K 窗口把 1.8MB 包限到 ~9KB/s（199s），提到 16K
+CONFIG_LWIP_TCP_WND_DEFAULT=16384
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384

@@ -1,0 +1,63 @@
+# ---- 构建产物（含本机绝对路径的大文件，不进仓库）----
+_build/
+build/
+*.o
+*.obj
+*.a
+*.elf
+*.bin.map
+
+# ---- 设备数据 dump（NVS 备份，非源码）----
+_nvs*.bin
+
+# ---- 分发/下载件（仓库即源码，zip 是产物不是源）----
+*.zip
+
+# ---- OTA 发布包（make_ota_release.py 现场生成：双版本 bin + version_*.json，
+#      含占位/实际托管 URL，随每次发版重生成，不进仓库）----
+_ota_release/
+
+# ---- 历史备份（2026-10-19 审计清理：这些 .bak* 已在 assets 分区化后失效，
+#      曾占仓库 ~2.8MB。新备份请落到仓库外，别再进库）----
+*.bak
+*.bak*
+*_bak*
+*.bak_*
+
+# ---- 旧合并快照 ----
+_pre_merge_*/
+
+# ---- 本地预览图 / 误提交的 0 字节文件（R216 全量检查）----
+/_preview/
+/=
+
+# ---- Python 缓存 ----
+__pycache__/
+*.pyc
+
+# ---- 根目录的一次性过程脚本（2026-10-28 清理：64 个 _fix*/_s*/_r10*/_a*/_d* 补丁脚本
+#      曾随源码树一起入库、每次打包上传资料库，是版本分叉的来源。过程脚本请放仓库外；
+#      长期复用的工具归入 scripts/_tools/（本规则只挡仓库根，不影响那个目录）----
+/_*.py
+/_*.json
+
+# ---- 可再生中间产物（.bin 才是正品，.raw/.prev/_orig 是过程文件）----
+*.raw
+*.prev
+*_orig.bin
+*.bak
+
+# ---- 编辑器/系统 ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ---- 根目录的 OTA 固件包（PetCat_v0.xxx_touch/key.bin）----
+#   2026-11-12 补：R178~R195 期间根目录堆了 PetCat_v0.178_touch.bin 等产物，
+#   和 _ota_release/ 里那 8 个一样属于「发布件」不是源码（仓库只放源码）。
+/PetCat_v*.bin
+
+# ── 一次性探测脚本：本地留着用，不进仓（免得每次 add -A 又把它们带上去）──
+prov_probe.py
+patch_switch_only.py

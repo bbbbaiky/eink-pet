@@ -1,0 +1,5 @@
+dependencies:
+  idf: ">=5.5"
+  espressif/esp_jpeg: "*"
+  # ★2026-10-24 深夜：图像通道核心件 —— 静默明信片（AI 生图 → 下载 → 解码 → 抖动 1-bit → mypost）
+  # 按键版工程同款依赖（两份 idf_component.yml 保持一致）。

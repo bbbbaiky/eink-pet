@@ -1,0 +1,7 @@
+# 统一 LF 入库（Windows 工作区也不要在仓库里留下 CRLF 噪音）
+* text=auto eol=lf
+
+# 二进制资产（明确不转码）
+*.bin binary
+*.png binary
+*.jpg binary

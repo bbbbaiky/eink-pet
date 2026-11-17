@@ -1,0 +1,11 @@
+{
+  "KEY": {
+    "bytes": 1457659,
+    "md5": "99dadd3b07c8bd3316d5e7b030bd4a9a"
+  },
+  "TOUCH": {
+    "bytes": 1552725,
+    "md5": "b389ea356c4559c187b03f6d8c05d798"
+  },
+  "_note": "纯重构基线；改行为的提交后需重新 --save。改前 --save，改完 --check，md5 必须全等。"
+}
