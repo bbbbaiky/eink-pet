@@ -1982,17 +1982,32 @@ int post_slow_tick(int today)
         if (due > today) { keep[nk++] = q[k]; continue; }
         int a = idx;
         if (post_is_got(a)) {
-            /* 路上这几天，这张被别的路（近郊/远行/AI）投过了 → 换一张**没收到过的**。
-               慢递的价值就在这里：必须是新片，不许变成"重复的旧片迟到"。 */
+            /* ★★R229 修（用户令，2026-11-18）：换片**只许同城**。
+               用户原话：「哪怕是慢递，它也是去杭州那趟寄的明信片，不该被替换成新疆的；
+               而且下一次猫不会再跑一趟杭州，没法补救」。
+               原实现 = 在整个近郊池 92 张里随机抽一张没收到过的 ⇒ 地点直接换城，
+               行程里写着 A、信箱里到手 B，"根本不在一个地方"。
+               新规则：① 同城（city 字段完全一致）且没收到过 → 换；
+                       ② 同城也没有了 → **丢弃这一条**（用户选定 B：宁可少一封，绝不重复、
+                          绝不跨城）。 */
+            const post_t *po   = post_at(idx);
+            const char   *city = (po && po->city[0]) ? po->city : NULL;
             a = -1;
-            for (int t = 0; t < 32; ++t) {
-                const int c = (int)(esp_random() % (unsigned)N_POST_BASE);
-                if (!post_is_got(c)) { a = c; break; }
+            if (city) {
+                int cnt = 0;
+                for (int t = 0; t < N_POST_BASE; ++t) {
+                    if (post_is_got(t)) continue;
+                    if (strcmp(g_posts[t].city, city) != 0) continue;
+                    ++cnt;                                   /* 蓄水池抽样：均匀取一张 */
+                    if ((int)(esp_random() % (unsigned)cnt) == 0) a = t;
+                }
             }
             if (a < 0) {
-                ESP_LOGW(TAG, "★ 慢递到期但近郊池已收满 → 丢弃这一条");
+                ESP_LOGW(TAG, "★ 慢递到期：同城「%s」已无新片 → 丢弃这一条（不跨城、不重复）",
+                         city ? city : "?");
                 continue;
             }
+            ESP_LOGW(TAG, "★ 慢递换片（限同城）：%d → %d（%s）", idx, a, city);
         }
         pick[nd] = a;
         pick_due[nd] = due;

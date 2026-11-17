@@ -8680,9 +8680,9 @@ static void ui_dev_id(char *out, size_t cap)
       改 FW_BUILD 的 R 号时，**同一笔改动里**就把 APP_VER_MINOR 和 PROJECT_VER 一起改掉。
    历史映射：R157~R163 曾显示为 v6.4；R164~R166 曾显示为 v6.5；R167 起回到 v0.167。 */
 #define APP_VER_MAJOR  0
-#define APP_VER_MINOR  228   /* == R 号；v0.228 ↔ R228。次版本号只增不减，1.0 时机由用户定 */
+#define APP_VER_MINOR  229   /* == R 号；v0.229 ↔ R229。次版本号只增不减，1.0 时机由用户定 */
 #define APP_VER_PATCH  0
-#define APP_VERSION     "v0.228"
+#define APP_VERSION     "v0.229"
 
 static void ui_fw_ver(char *out, size_t cap)
 {
@@ -12430,6 +12430,8 @@ static bool map_near_has(int series)
     return false;
 }
 
+static const char *map_near_name(int series);   /* ★R229：行表要按"有没有可信地名"过滤，提前声明 */
+
 static int map_rows(int *idx, int cap)
 {
     int k[3 + EXP_N];
@@ -12437,6 +12439,9 @@ static int map_rows(int *idx, int cap)
     int n = 0;
     for (int s = 0; s < 3; ++s) {
         if (!map_near_has(s)) continue;
+        /* ★R229：这一系列只在笔友信里出现过（或老存档没有普通片）→ 没有可信地名，**不占一行**。
+           以前靠 NEAR_PLACE 顶着「上海/黄山/舟山」，那三个是测试地名，已按用户令删除。 */
+        if (!map_near_name(s)[0]) continue;
         k[n] = s; last[n] = map_last_get(s); ++n;
     }
     for (int ed = 0; ed < EXP_N; ++ed) {
@@ -12456,16 +12461,10 @@ static int map_rows(int *idx, int cap)
     return n < cap ? n : cap;
 }
 
-/* ★R131：近郊三条的显示地名（原型 p17 口径：真实城市名，不是系列名） */
-static const char *NEAR_PLACE[3] = { "上海", "黄山", "舟山" };
-
-/* ★R133（用户报「猫去了平遥寄了两张，旅程里没有平遥的记录」）：
-   `NEAR_PLACE` 是**原型稿的固定地名**，而近郊只有一个"系列"桶（0x80 城市 / 0x81 山野 / 0x82 海滨）。
-   实际去的城市是随机的（平遥/绍兴/大理/桂林…），所以行名必须**从流水反查** —— 记录里存的是
-   明信片下标，片的 `city` 字段才是真实地名。
-   取"该系列**最近一趟**去过的城市"；没有流水（老存档）时回退固定名。
-   ⚠ 局限：同一系列先后去过两座城，这里只显示最近那座（详情页也只有最近一趟）。
-      真要列多城得把旅迹页近郊改成"按城市分行"，那是另一轮的事。 */
+/* ★R229（用户令）：删掉 `NEAR_PLACE[3] = {"上海","黄山","舟山"}` —— 那三个是**当年看版式的
+   测试地名**，不是真实数据，不许再当回落值（用户原话：「不回落什么上海黄山舟山，这是之前的
+   一个测试数据」）。现在近郊行名的**唯一来源** = 该系列里最近一趟「非笔友信」那张片的 `city`；
+   找不到就返回空串 ⇒ 这一行不显示（宁可少一行，也不编一个地名顶上）。 */
 static const char *map_near_name(int series)
 {
     if (series < 0 || series > 2) return "";
@@ -12476,15 +12475,21 @@ static const char *map_near_name(int series)
     for (int i = 0; i < s_jt.n; ++i) {
         const jtrip_rec_t *r = &s_jt.r[i];
         if (r->ed != ed) continue;
+        /* ★R229 修（用户报「旅程标题居然显示小鸟邮局」）：内置 47 张里有 8 张笔友来信把**寄信人**
+           塞进了 city（"小鸟邮局"/"蝴蝶邮局"，数据一条没改、只在显示侧识别）。原来直接拿最近一趟
+           那张片的 city 当站名 ⇒ 那趟若寄的是笔友信，行标题就成了「小鸟邮局」，地点消失。
+           这里跳过笔友信，取最近一趟**普通片**的地名。 */
+        if (post_sender_kind(r->post) != POST_SENDER_CAT) continue;
         if (best_i < 0 || (int16_t)(r->tid - best) > 0) { best = r->tid; best_i = i; }
     }
     if (best_i >= 0) {
         const post_t *p = post_at(s_jt.r[best_i].post);
         if (p && p->city[0]) return p->city;
     }
-    return NEAR_PLACE[series];
+    return "";                 /* ★R229：没有可信地名 → 不显示该行（不再回落测试地名） */
 }
 
+static void draw_center_hint(int kind, const char *txt);   /* ★R229：旅程空态要用，定义在下方 */
 static void draw_map_page(void)
 {
     fb_clear_white();
@@ -12498,14 +12503,15 @@ static void draw_map_page(void)
        ③ 行首 = **圆圈 + 芯 + 竖虚线**串成时间线（不是钉子/圆点）；
        ④ 右侧**只写去的日期**（不写「去过 N 次」——一次旅行跨多天，次数既装不下也是错的）。
        ⑤ ★2026-10-19 用户令：左侧 = **地名**（上海/佘山/舟山 + 远行城市名），不写系列名。 */
-    /* ★★2026-10-19 用户令：左边显示**真实城市的地名**，不是系列名（城市/山野/海滨）——
-       原型 p17 左边就是「上海/京都/威尼斯」。近郊三条的数据模型只记系列（map_cnt0..2），
-       没有逐次地名 ⇒ 按系列定名（表在此，改名字只改这一行；均已过字检）：
-       城市→上海（原型 p17 同款）/ 山野→黄山（真城市，游戏内明信片"黄山 安徽"同款地名）/
-       海滨→舟山（真城市，浙江海岛）。远行四条本就是 EXP_TBL 真实城市名，不用动。 */
+    /* ★R229（用户令）：近郊行名**只来自真实地名**（该系列最近一趟普通片的 city）。
+       原来这里解释的「按系列固定定名（上海/黄山/舟山）」已作废 —— 那三个是当年看版式的
+       测试地名，用户明确要求删掉，不许再当回落值。没有可信地名 ⇒ 该行不显示。 */
     /* ★R131：行表抽成 map_rows()（详情页反查同一份顺序） */
     int idx[3 + EXP_N];
     const int n = map_rows(idx, 3 + EXP_N);
+    /* ★R229：一行都没有（只在笔友信里出现过 / 全新存档且没出过远门）→ 整屏居中提示，
+       不要留一张只有标题的空页。 */
+    if (n <= 0) { draw_center_hint(ZF_FONT_BODY, T("没有行程记录")); return; }
     /* 光标越界夹回（去过的地方变多/变少都可能发生） */
     if (g_map_sel >= n) g_map_sel = n - 1;
 #if TOUCH_DEMO
@@ -20757,7 +20763,7 @@ typedef struct { const char *q; const char *opt[3]; } pers_q_t;
       若设备仍是 R195 assets，则需 app + assets 一起烧（不擦 NVS）。
 */
 
-#define FW_BUILD  APP_VERSION " · R228"  /* ★R228：**全量复查 + 3 处修复**（①续传失败 NULL close 崩溃 ②续传轮转起错源 ③OTA_FOUND 页漏进轻推白名单）；含 R226 防休眠 + R224 换序 + R223 按键反白 + R222 续传 */
+#define FW_BUILD  APP_VERSION " · R229"  /* ★R229：**旅程站名与慢递换片**（①近郊行名跳过笔友信、删测试地名回落 ②慢递只在同城换片、同城满则丢弃）；含 R228 三修 + R226 防休眠 + R224 换序 + R223 反白 + R222 续传 */
 /* 历史：R217 = 遗留 9 条收口（go_page 默认清框 / 按键软件去抖 / 路径去硬编码 / 三语硬拦 / 生成链自足）（含 R216）
    ── 用户令（2026-11-13）：「需要我定夺的那些也改」。
    ── ① TF卡信可转发：mypost_fwd_begin 改按 ts 反查条目（mypost_entry_by_ts），
