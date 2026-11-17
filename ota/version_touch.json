@@ -1,9 +1,9 @@
 {
- "ver": "0.226",
+ "ver": "0.227",
  "size": 1820800,
  "url": "https://ghfast.top/https://raw.githubusercontent.com/bbbbaiky/eink-pet/main/ota/pet_touch.bin",
  "notes": [
-  "R226: no deep-sleep during OTA download",
-  "unplugged USB no longer aborts upgrade"
+  "R227: test carrier, verify no deepsleep on USB off",
+  "from 226, unplugged"
  ]
 }

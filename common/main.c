@@ -8676,9 +8676,9 @@ static void ui_dev_id(char *out, size_t cap)
       改 FW_BUILD 的 R 号时，**同一笔改动里**就把 APP_VER_MINOR 和 PROJECT_VER 一起改掉。
    历史映射：R157~R163 曾显示为 v6.4；R164~R166 曾显示为 v6.5；R167 起回到 v0.167。 */
 #define APP_VER_MAJOR  0
-#define APP_VER_MINOR  226   /* == R 号；v0.226 ↔ R226。次版本号只增不减，1.0 时机由用户定 */
+#define APP_VER_MINOR  227   /* == R 号；v0.227 ↔ R227。次版本号只增不减，1.0 时机由用户定 */
 #define APP_VER_PATCH  0
-#define APP_VERSION     "v0.226"
+#define APP_VERSION     "v0.227"
 
 static void ui_fw_ver(char *out, size_t cap)
 {
@@ -20753,7 +20753,7 @@ typedef struct { const char *q; const char *opt[3]; } pers_q_t;
       若设备仍是 R195 assets，则需 app + assets 一起烧（不擦 NVS）。
 */
 
-#define FW_BUILD  APP_VERSION " · R226"  /* ★R226：**OTA 下载期间禁止空闲深睡**（拔 USB 后下载中途 45s 超时弹回首页+深睡，检查中/下载中续期）；含 R225 + R224 换序 + R223 按键反白 + R222 续传 */
+#define FW_BUILD  APP_VERSION " · R227"  /* ★R227：**测试载体**（功能同 R226，版本号+1 让 226 实机有版本可升，验证拔 USB 下载不休眠）；含 R226 防休眠 + R224 换序 + R223 按键反白 + R222 续传 */
 /* 历史：R217 = 遗留 9 条收口（go_page 默认清框 / 按键软件去抖 / 路径去硬编码 / 三语硬拦 / 生成链自足）（含 R216）
    ── 用户令（2026-11-13）：「需要我定夺的那些也改」。
    ── ① TF卡信可转发：mypost_fwd_begin 改按 ts 反查条目（mypost_entry_by_ts），
