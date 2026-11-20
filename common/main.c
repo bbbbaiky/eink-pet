@@ -3073,6 +3073,18 @@ static bool epd_push(const uint8_t *buf)
    现在是**连续 24 次**必插全刷，见下面 PARTIAL_MAX=24（2026-10-20 由 8 放宽；更早的 6 是 09-19 的值）。 */
 #define FAST_MAX_PX   16000     /* ★2026-10-22 用户令（嫌刷新太保守）：20%→40%，让更多页内/轻量换页走局刷；
                                    面积超 40% 仍全刷防残影；连续 PARTIAL_MAX 次后强制全刷已兜底。 */
+/* ★★R232（用户报「收藏品里点来点去全刷非常频繁，很多页面其实局刷就行」）：
+   **面积闸改成"实心面积闸"**。
+   ── 原逻辑：总差分 > FAST_MAX_PX(16000) 一律全刷（除非 big_sparse：填充 ≤15% 且实心 <35%）。
+      但整页文字换页（分类→列表、详情→返回）经常是 2~3 万 px、填充 20~30%
+      —— 它既不是 big_sparse，也超了面积闸 ⇒ **每次换页都白付一次 1.8s 全刷**。
+   ── 物理依据（本工程反复验证过）：单相局刷推不动的**不是"总像素多"，而是"连成片的实心黑↔白"**。
+      文字/边框是 1~9px 细笔画，再多也推得动（走重推表就够）；真正的雷是整幅实心翻转。
+   ── 所以判据换成**实心像素总量**（fb_diff_stat 已经算好 solid_px，不额外扫描）：
+        solid_px ≤ 5000（约 12.5% 屏）→ 允许局刷（重推表）
+        实心更多（整猫换姿态实测 6373、整幅插图 3 万）→ 仍然整屏全刷（防发灰）
+   ── 只在"重推表可用"（s_fast_lut_sel != 0，本工程默认档）时生效；退回档 0 时行为不变。 */
+#define FAST_SOLID_AREA_MAX 5000
 /* ★★ 2026-09-29 新增（方案 A · 形态闸）：包围盒"绝对小"判据。
    ── 与 win_band_ok（窄带）、FAST_FILL_PCT（低填充率）并列的第三条放行路：
       覆盖"页内换高亮"这类**不是窄带、bbox 也不极小、但改动就是几个小框**的场景。
@@ -3168,6 +3180,15 @@ static bool    s_anim_playing = false;
    这里记「自从上次真全刷以来画过行选中框」，下一次回到行列表页时作废基线走一次 0xC7，
    把灰推干净；真全刷一落地就清标志 ⇒ 每次"点开→返回"最多付一次真正全刷。 */
 static bool    s_row_frame_pending = false;
+
+/* ★★R234（用户令：「框要，但不要全刷」）：一次性标志 —— **这一帧禁止整屏全刷**。
+   背景：R202 为了让 Mode2 全刷推净 1px 行框留下的灰影，采用"作废基线 → 走 0xC7 真全刷"，
+   代价是每次「点一下（出框）→ 跳转」都整屏闪两下（1.8s）。用户明确不要这个代价。
+   改法：框照旧先画（局刷，干净），跳转那一帧**强制走局刷路径**（含 1px 框的擦除），
+   用局刷表把框线推开 —— 与"同一页里移动框"是同一件事，肉眼看不出灰。
+   为什么这样成立：灰影只出现在 **Mode2 全刷**里（它只驱动变化像素、不重新锚定），
+   局刷表对 1px 细线本来就是"M 相推得动"，所以只要这一帧不进全刷就不会有灰。 */
+static bool    s_epd_avoid_full = false;
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * ★★ 2026-10-10 遍历重构：差分统计「一次扫描出四个量」
@@ -3320,6 +3341,7 @@ void epd_commit(const uint8_t *buf, bool allow_fast)
        那条只在**真有变化**时才走到，不会白闪。 */
     if (diff == 0) {
         s_epd_force_light = false;   /* ★R144：本帧不刷新，一次性标志必须就地清掉，否则串到下一帧选错波形表 */
+        s_epd_avoid_full  = false;   /* ★R234：同上（没有变化就没有"要不要全刷"的问题） */
         ESP_LOGI(TAG, "   画面无变化（差异 0 px，%s）→ 跳过刷新",
                  s_partial_run == 0 ? "上次为全刷·屏上即此帧" : "局刷路径");
         return;                                 /* 屏上已经是这一帧，不必再刷 */
@@ -3352,7 +3374,10 @@ void epd_commit(const uint8_t *buf, bool allow_fast)
     /* ★2026-10-20：`diff >= 0 && !no_change`(no_change = diff==0) 等价于 `diff > 0`，
        前一个子式是多余的可读性负担（diff==-1 时 !no_change 为真但已被 diff>=0 先挡下）
        ⇒ 合并。行为逐字节等价。 */
-    const bool fast_ok = diff > 0 && (s_anim_playing || s_partial_run < PARTIAL_MAX);
+    /* ★R234：本帧是否被 R202 补偿要求"不许全刷"（一次性，消费即清） */
+    const bool avoid_full = s_epd_avoid_full;
+    s_epd_avoid_full = false;
+    const bool fast_ok = diff > 0 && (s_anim_playing || avoid_full || s_partial_run < PARTIAL_MAX);
     bool refreshed = false;
 
     /* ★★2026-10-22 用户令（「全刷次数太多，我要少闪」）：**面积闸只该管"实心大片"**。
@@ -3370,7 +3395,12 @@ void epd_commit(const uint8_t *buf, bool allow_fast)
                                  <= FAST_FILL_PCT) &&
                             ((ds.diff > 0 ? (ds.solid_px * 100 / ds.diff) : 0) < FAST_SOLID_SHARE);
 
-    if (fast_ok && (s_anim_playing || diff <= FAST_MAX_PX || big_sparse)) {
+    /* ★R232：面积闸的第三条放行路 —— 实心像素总量小 ⇒ 局刷（见 FAST_SOLID_AREA_MAX 注释）。
+       ⚠ 必须放在 diff 判定之前算：ds 只在 s_last_valid 时有效（fb_diff_stat 已填）。 */
+    const bool solid_area_ok = (s_fast_lut_sel != 0) && ds.have &&
+                               (ds.solid_px <= FAST_SOLID_AREA_MAX);
+
+    if (fast_ok && (s_anim_playing || avoid_full || diff <= FAST_MAX_PX || big_sparse || solid_area_ok)) {
         /* ①-a 面积过闸 → 再验形态。（包围盒已由上面 fb_diff_stat 一次算出） */
         const bool have_bbox = ds.have;
         const int l = ds.l, t = ds.t, r = ds.r, b = ds.b;
@@ -3467,6 +3497,7 @@ void epd_commit(const uint8_t *buf, bool allow_fast)
                          s_partial_run + 1, PARTIAL_MAX);
                 s_partial_run++;
                 refreshed = true;
+                if (avoid_full) s_row_frame_pending = false;   /* ★R234：这一帧已把框推净，不必再补全刷 */
             }                                       /* 局刷失败 → 落到下面统一退回全刷 */
         } else {
             /* ①-c ★ 面积过闸但形态是"一大片实心翻转" → 拒局刷，退回整屏全刷。
@@ -3479,12 +3510,14 @@ void epd_commit(const uint8_t *buf, bool allow_fast)
     } else if (diff > FAST_MAX_PX) {
         /* ② 超面积 → 整屏全刷（防残影）。打印包围盒帮诊断（这一帧变在哪、多大）。
            ★★ 2026-10-10：包围盒复用上面 fb_diff_stat 的，不再为打日志再扫一遍。
-           （能走到这里 ⇒ diff>FAST_MAX_PX>0 ⇒ s_last_valid 为真 ⇒ ds 已填充。） */
+           （能走到这里 ⇒ diff>FAST_MAX_PX>0 ⇒ s_last_valid 为真 ⇒ ds 已填充。）
+           ★R232：把**实心像素数**也打出来 —— 现在"实心面积闸"是面积之外的第二判据，
+           调 FAST_SOLID_AREA_MAX 时看这一个数就够，不用再猜。 */
         if (ds.have) {
             const int l = ds.l, t = ds.t, r = ds.r, b = ds.b;
             const int w = r - l + 1, h = b - t + 1;
-            ESP_LOGI(TAG, "   差异 %d px（包围盒 %d×%d，占屏 %d%%）> 阈值 %d → 整屏全刷（防残影）",
-                     diff, w, h, w * h * 100 / (EPD_W * EPD_H), FAST_MAX_PX);
+            ESP_LOGI(TAG, "   差异 %d px（包围盒 %d×%d，占屏 %d%%，实心 %d px）> 阈值 %d → 整屏全刷（防残影）",
+                     diff, w, h, w * h * 100 / (EPD_W * EPD_H), ds.solid_px, FAST_MAX_PX);
         } else {
             ESP_LOGI(TAG, "   差异 %d px > 阈值 %d → 整屏全刷（防残影）", diff, FAST_MAX_PX);
         }
@@ -4571,10 +4604,17 @@ static const loot_fx_t g_loot_fx[] = {
     /* ── 亲密度衰减（取最小；100 = 原样，50 = 减半，0 = 在外不变淡）── */
     { LOOT_I_PHOTO_TOGETHER, LFX_DECAY_PCT, 75, LFX_SC_NONE },
     { LOOT_I_SHARED_UMBRELLA,LFX_DECAY_PCT, 75, LFX_SC_RAIN },
-    { LOOT_I_FLOWER,         LFX_DECAY_PCT, 20, LFX_SC_NONE },  /* ★R112 干花枝 50→20（落到 <=25 档 ⇒ 0/天，坐实文案「慢很多」） */
-    { LOOT_I_MOONSTONE,      LFX_DECAY_PCT, 20, LFX_SC_NIGHT }, /* ★R112 月亮石 50→20（同上） */
-    { LOOT_I_IVY,            LFX_DECAY_PCT, 20, LFX_SC_RAIN },  /* ★R112 常青藤 50→20（同上） */
-    { LOOT_I_KNOT,           LFX_DECAY_PCT, 20, LFX_SC_NONE },
+    /* ★★R235（用户 2026-11-19 评估后拍板）：干花枝/月亮石/常青藤 **20 → 50**。
+       ── 20 落在 net_sync.c 的 `decay <= 25 → 再 +1` 那一档 ⇒ 在外 -2/+1/+1 = **0/天**，
+          等于把「分开久了会疏远」整条机制关掉；而文案只写「淡化大幅变慢」= 名不副实。
+       ── 而且这三件是 **carry=0（拥有即生效、不占携带位）**，等于免费永久免疫。
+       ── 现在 50 ⇒ 只吃到第一档 +1 ⇒ 在外 -1/天（**减半**），文案对得上。
+       ⚠ 别再把它们调回 20/25 以下 —— 「完全不淡化」只留给**同心结**（carry=1、里程碑件、
+         占一个携带位换免疫，那才是设计意图）。 */
+    { LOOT_I_FLOWER,         LFX_DECAY_PCT, 50, LFX_SC_NONE },  /* 干花枝：感情淡化减半 */
+    { LOOT_I_MOONSTONE,      LFX_DECAY_PCT, 50, LFX_SC_NIGHT }, /* 月亮石：夜间减半 */
+    { LOOT_I_IVY,            LFX_DECAY_PCT, 50, LFX_SC_RAIN },  /* 常青藤：雨天减半 */
+    { LOOT_I_KNOT,           LFX_DECAY_PCT, 20, LFX_SC_NONE },  /* 同心结：携带 ⇒ 在外不变淡（唯一免疫件）*/
     /* ── 亲密增益（scope 区分抚摸/喂食/回家/明信片）── */
     { LOOT_I_WAND,        LFX_GAIN_PP, 1, LFX_SC_PET },
     { LOOT_I_CUSHION,     LFX_GAIN_PP, 1, LFX_SC_PET },
@@ -8680,9 +8720,9 @@ static void ui_dev_id(char *out, size_t cap)
       改 FW_BUILD 的 R 号时，**同一笔改动里**就把 APP_VER_MINOR 和 PROJECT_VER 一起改掉。
    历史映射：R157~R163 曾显示为 v6.4；R164~R166 曾显示为 v6.5；R167 起回到 v0.167。 */
 #define APP_VER_MAJOR  0
-#define APP_VER_MINOR  231   /* == R 号；v0.231 ↔ R231。次版本号只增不减，1.0 时机由用户定 */
+#define APP_VER_MINOR  235   /* == R 号；v0.232 ↔ R232。次版本号只增不减，1.0 时机由用户定 */
 #define APP_VER_PATCH  0
-#define APP_VERSION     "v0.231"
+#define APP_VERSION     "v0.235"
 
 static void ui_fw_ver(char *out, size_t cap)
 {
@@ -14464,8 +14504,8 @@ static bool __attribute__((unused)) achv_on_tap(int x, int y)
     for (int i = 0; i < ACHV_PER_PAGE && (off + i) < ACHV_N; ++i) {
         if (y >= AROW_Y[i] - 8 && y <= AROW_Y[i] + 26) {     /* 行热区（pitch 36 不重叠） */
             g_achv_sel = off + i;
-            /* ★★2026-10-19（用户报「成就页动不动就全刷」+ 触屏惯例）：先亮选中框（局刷·单段式反馈，
-               收藏品/背包列表同款），随后才跳详情 —— 原来直接 go_page = 每次点击都是硬全刷。 */
+            /* ★★R234（用户令）：**框要留**。R233 删掉「先亮框」是错的 —— 用户要的是"点一下先出框、
+               再跳转"，只是不要那次全刷。全刷的根源已改到 R202 那条补偿上（见 s_epd_avoid_full）。 */
             page_render(true);
             go_page(PG_ACHV_DET);
             return true;
@@ -16206,7 +16246,9 @@ void go_page(page_t p)
         friend_net_msg_mark_read(g_fr_sel);
 #if TOUCH_DEMO
     /* ★R202（用户令）：回到行列表页时，若"上次真全刷以来画过行选中框"，作废基线走真全刷除灰。 */
-    if (page_is_row_list(p) && s_row_frame_pending) s_last_valid = false;
+    /* ★R234：原来这里 `s_last_valid = false`（= 下一帧 diff<0 → 0xC7 真全刷，整屏闪两下）。
+       用户令「框要、但不要全刷」⇒ 改成"下一帧禁止走全刷"，靠局刷表把 1px 框推开。 */
+    if (page_is_row_list(p) && s_row_frame_pending) s_epd_avoid_full = true;
 #else
     /* ★R202（全量复查）：按键版 g_cat_sel 被「收藏品分类 / 明信片分类 / 随身四堆」三页共用，
        从分类页第 3 行（随身物品，g_cat_sel=2）进四堆页时，框会直接落在第 3 行「海滨」上。
@@ -19372,6 +19414,7 @@ static void touch_tap(int x, int y)
         int row = touch_row_at(TEST_ROW_Y, n, y);
         if (row < 0) break;
         g_cat_sel = row;
+        /* ★★R234（用户令）：先出框再跳（保留），但**不再**因此付一次真全刷 —— 见 s_epd_avoid_full。 */
         page_render(true);                       /* ★先画选中框（与测试菜单同款「亮框→进入」） */
         if (g_page == PG_LOOT_CAT) loot_cat_pick(row);
         else                       post_cat_pick(row);
@@ -19381,6 +19424,7 @@ static void touch_tap(int x, int y)
         int row = touch_row_at(TEST_ROW_Y, 4, y);
         if (row < 0) break;
         g_cat_sel = row;
+        /* ★★R234：同上 —— 框保留，全刷去掉。 */
         page_render(true);
         loot_stack_pick(row);
         break;
@@ -20867,7 +20911,7 @@ typedef struct { const char *q; const char *opt[3]; } pers_q_t;
       若设备仍是 R195 assets，则需 app + assets 一起烧（不擦 NVS）。
 */
 
-#define FW_BUILD  APP_VERSION " · R231"  /* ★R231：**慢递换片回写流水**（换片进同一条流水、同城满被舍弃则删掉那条）+ 含 R230 旅程对齐（笔友信不进行程 / 站名取明信片地区）+ R229 同城换片 + R228 三修 */
+#define FW_BUILD  APP_VERSION " · R235"  /* ★R235：**感情减淡件 20→50**（干花枝/月亮石/常青藤不再"在外零衰减"，改为减半；唯一免疫留给携带型同心结）+ 含 R234 框保留但去全刷 */
 /* 历史：R217 = 遗留 9 条收口（go_page 默认清框 / 按键软件去抖 / 路径去硬编码 / 三语硬拦 / 生成链自足）（含 R216）
    ── 用户令（2026-11-13）：「需要我定夺的那些也改」。
    ── ① TF卡信可转发：mypost_fwd_begin 改按 ts 反查条目（mypost_entry_by_ts），
